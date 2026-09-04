@@ -11,7 +11,7 @@ def classifying_goals(model_name, output_model_path, goals_dic_data, device, max
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = SMARTClassifier(model_name).to(device)
-
+    model.float()
     print(f"Loading best model from {output_model_path}")
     model.load_state_dict(torch.load(output_model_path))
     model.to(device)
@@ -142,7 +142,8 @@ if __name__ == "__main__":
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-    device = torch.device(f"cuda:{args.gpu}")
+    # device = torch.device(f"cuda:{args.gpu}")
+    device = torch.device("cpu")
 
     # prepare paths for goal extraction
     extract_model_name_abb = args.extract_model_name.split("/")[-1]

@@ -536,6 +536,8 @@ def subwordid_to_text(batch_example, spans_predict, token_idx_maps, results, gol
 
 @torch.no_grad()
 def evaluate(model, test_examples, eval_batch_size, max_len, tokenizer=None, device=None):
+    model.float()
+    model.to(device)
     model.eval()
     step_count = len(test_examples) // eval_batch_size
     if step_count * eval_batch_size < len(test_examples):
