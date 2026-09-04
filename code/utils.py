@@ -136,10 +136,14 @@ def split_sequence(bert_output_word_q, background_range, useSep=True, set_max_le
         mask.append(mask_item)
         offset += 1
 
-    index_select = torch.tensor(index_select, dtype=torch.long)
-    index_select = index_select.cuda()
-    mask = torch.tensor(mask, dtype=torch.long)
-    mask = mask.cuda()
+    # index_select = torch.tensor(index_select, dtype=torch.long)
+    # index_select = index_select.cuda()
+    # mask = torch.tensor(mask, dtype=torch.long)
+    # mask = mask.cuda()
+    device = bert_output_word_q.device
+
+    index_select = torch.tensor(index_select, dtype=torch.long, device=device)
+    mask = torch.tensor(mask, dtype=torch.long, device=device)
     sequence_output = bert_output_word_q.reshape(-1, dim)
     sequence_output = torch.cat([sequence_output.new_zeros((1, dim), dtype=torch.float), sequence_output],
                                 dim=0)

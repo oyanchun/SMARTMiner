@@ -145,7 +145,8 @@ def evaluate(model, dataloader, name="valid", raw_data=None, res_path=None, devi
 def train_loop(model, train_loader, valid_loader, optimizer, model_path, epochs, device, patience):
     best_val_loss = float('inf')
     patience_counter = 0
-
+    model.float()
+    model.to(device)
     for epoch in range(epochs):
         model.train()
         total_loss = 0
@@ -258,7 +259,8 @@ if __name__ == "__main__":
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-    device = torch.device(f"cuda:{args.gpu}")
+    # device = torch.device(f"cuda:{args.gpu}")
+    device = torch.device("cpu")
 
     model_name_abb = args.model_name.split("/")[-1]
     parameter_name = f"lr_{args.lr}_seed_{args.seed}_bs_{args.batch_size}"

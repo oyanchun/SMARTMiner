@@ -652,7 +652,8 @@ if __name__ == "__main__":
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-    device = torch.device(f"cuda:{args.gpu}")
+    # device = torch.device(f"cuda:{args.gpu}")
+    device = torch.device("cpu")
 
     model_name_abb = args.model_name.split("/")[-1]
 
@@ -685,6 +686,15 @@ if __name__ == "__main__":
     max_span_gap = get_max_gap(train_examples, tokenizer)
 
     model = SpanQualifier(args.model_name, max_span_gap, args.dim2, args.max_len, device).to(device)
+
+    print("Model dtype:",
+                next(model.parameters()).dtype)
+    
+    print("Encoder dtype:",
+        next(model.token_representation.parameters()).dtype)
+
+    print("Boundary dtype:",
+        next(model.boundary_representation.parameters()).dtype)
 
     print("# parameters:", sum(param.numel() for param in model.parameters()))
     print(json.dumps({"lr": args.lr, "model": args.model_name, "seed": args.seed,
@@ -738,6 +748,8 @@ if __name__ == "__main__":
             new_state_dict[nk] = v
 
         missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
+        model.float()
+        model.to(device)
         print("Initialized from:", ckpt_path)
         print(f"Missing keys: {len(missing)} | Unexpected keys: {len(unexpected)}")
         if missing:
