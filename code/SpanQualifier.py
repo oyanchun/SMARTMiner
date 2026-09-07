@@ -689,15 +689,6 @@ if __name__ == "__main__":
 
     model = SpanQualifier(args.model_name, max_span_gap, args.dim2, args.max_len, device).to(device)
 
-    print("Model dtype:",
-                next(model.parameters()).dtype)
-    
-    print("Encoder dtype:",
-        next(model.token_representation.parameters()).dtype)
-
-    print("Boundary dtype:",
-        next(model.boundary_representation.parameters()).dtype)
-
     print("# parameters:", sum(param.numel() for param in model.parameters()))
     print(json.dumps({"lr": args.lr, "model": args.model_name, "seed": args.seed,
                       "bs": args.train_batch_size,
@@ -786,6 +777,8 @@ if __name__ == "__main__":
         best_dev_acc = 0
 
     best_dev_result, best_test_result = None, None
+    best_epoch = None
+    training_log = []
     for epoch in range(args.epoch_num):
         tr_loss, nb_tr_steps = 0, 0.1
         if early_stop>=5:
@@ -829,18 +822,39 @@ if __name__ == "__main__":
         f1 = result_score_dev["overlap_f1"] + result_score_dev["em_f1"]
         print(prettyprint(result_score_dev))
 
+        epoch_log = {
+            "epoch": epoch,
+            "train_loss": round(tr_loss / nb_tr_steps, 6),
+            "dev_result": result_score_dev,
+            "dev_score_sum": f1,
+            "is_best": False,
+        }
+
         if f1 > best_dev_acc:
             early_stop = 0
             best_dev_result = result_score_dev
             best_dev_acc = f1
+            best_epoch = epoch
+            epoch_log["is_best"] = True
             save_model(output_model_path, model, optimizer)
             save_dataset(path_save_result + "/valid.json", results_dev)
             print("save new best")
 
             result_score_test, results_test = evaluate(model, test_examples, args.eval_batch_size, args.max_len, tokenizer, device)
             best_test_result = result_score_test
+            epoch_log["test_result"] = result_score_test
             print("test:", prettyprint(result_score_test))
             save_dataset(path_save_result + "/test.json", results_test)
 
-    print("best_valid_result:", prettyprint(best_dev_result))
-    print("best_test_result:", prettyprint(best_test_result))
+        training_log.append(epoch_log)
+
+    with open(path_save_result + "/training_log.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "best_epoch": best_epoch,
+            "best_dev_result": best_dev_result,
+            "best_test_result": best_test_result,
+            "history": training_log,
+        }, f, ensure_ascii=False, indent=2)
+
+    print("best_valid_result:", prettyprint(best_dev_result) if best_dev_result is not None else "None")
+    print("best_test_result:", prettyprint(best_test_result) if best_test_result is not None else "None")

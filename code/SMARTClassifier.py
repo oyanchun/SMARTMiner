@@ -5,6 +5,14 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModel
 from torch.optim import AdamW
 from sklearn.metrics import classification_report
+
+
+def report_to_dict(report):
+    return {
+        key: {metric: float(value) for metric, value in metrics.items()}
+        if isinstance(metrics, dict) else float(metrics)
+        for key, metrics in report.items()
+    }
 from tqdm import tqdm
 
 def set_seed(seed):
@@ -124,8 +132,9 @@ def evaluate(model, dataloader, name="valid", raw_data=None, res_path=None, devi
                         "SMA_pred": pred_sma
                     })
 
-    report = classification_report(gold, pred, digits=3)
-    print(f"\n{name} classification report: {report}")
+    report = classification_report(gold, pred, digits=3, output_dict=True)
+    report_text = classification_report(gold, pred, digits=3)
+    print(f"\n{name} classification report: {report_text}")
 
     # saving predictions and stats
     if res_path:
@@ -137,14 +146,22 @@ def evaluate(model, dataloader, name="valid", raw_data=None, res_path=None, devi
 
         # write stats
         with open(f"{res_path}/{name}_stats.txt", "w", encoding="utf-8") as f:
-            f.write(report)
+            f.write(report_text)
+
+        # write structured report
+        with open(f"{res_path}/{name}_report.json", "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
 
     return total_loss / len(dataloader)
 
 # train loop
-def train_loop(model, train_loader, valid_loader, optimizer, model_path, epochs, device, patience):
+def train_loop(model, train_loader, valid_loader, optimizer, model_path, epochs, device, patience, results_dir):
     best_val_loss = float('inf')
+    best_epoch = None
+    best_val_report = None
+    best_test_report = None
     patience_counter = 0
+    training_log = []
     model.float()
     model.to(device)
     for epoch in range(epochs):
@@ -165,25 +182,54 @@ def train_loop(model, train_loader, valid_loader, optimizer, model_path, epochs,
         avg_train_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch+1}: Train loss = {avg_train_loss:.4f}")
 
-        val_loss = evaluate(model, valid_loader, name="Validation", device=device)
+        val_loss = evaluate(model, valid_loader, name="Validation", res_path=results_dir, device=device)
         print(f"Epoch {epoch+1}: Validation loss = {val_loss:.4f} (best so far: {best_val_loss:.4f})")
+
+        val_report_path = os.path.join(results_dir, "Validation_report.json")
+        val_report = None
+        if os.path.exists(val_report_path):
+            with open(val_report_path, "r", encoding="utf-8") as f:
+                val_report = json.load(f)
+
+        epoch_log = {
+            "epoch": epoch,
+            "train_loss": round(avg_train_loss, 6),
+            "val_loss": round(val_loss, 6),
+            "val_report": val_report,
+            "is_best": False,
+        }
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_epoch = epoch
             patience_counter = 0
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
             torch.save(model.state_dict(), model_path)
             print(f"Saved new best model to {model_path}")
+
+            best_val_report = val_report
+            epoch_log["is_best"] = True
         else:
             patience_counter += 1
             print(f"No improvement. Patience {patience_counter}/{patience}")
             if patience_counter >= patience:
                 print("Early stopping triggered.")
+                training_log.append(epoch_log)
                 break
+
+        training_log.append(epoch_log)
+
+    with open(os.path.join(results_dir, "training_log.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss if best_val_loss != float('inf') else None,
+            "best_val_result": best_val_report,
+            "history": training_log,
+        }, f, ensure_ascii=False, indent=2)
         
 # function for fine tuning
 def train(model, tokenizer, data_set_dir, max_len, batch_size, device, lr, 
-        output_model_path, epochs, patience):
+        output_model_path, epochs, patience, results_dir):
 
     train_data = load_data(os.path.join(data_set_dir, "train_classify.jsonl"))
     valid_data = load_data(os.path.join(data_set_dir, "valid_classify.jsonl"))
@@ -197,7 +243,7 @@ def train(model, tokenizer, data_set_dir, max_len, batch_size, device, lr,
     optimizer = AdamW(model.parameters(), lr=lr)
     
     train_loop(model, train_loader, valid_loader, optimizer, output_model_path, epochs, device, 
-            patience)
+            patience, results_dir)
 
 # main function
 if __name__ == "__main__":
@@ -277,7 +323,7 @@ if __name__ == "__main__":
     # Training
     if args.only_eval == False:
         train(model, tokenizer, dataset_path, args.max_len, args.batch_size, device,
-                args.lr, output_model_path, args.epochs, args.patience)
+                args.lr, output_model_path, args.epochs, args.patience, path_save_result)
 
     # Evaluation
     print(f"\nLoading best model from {output_model_path}")
