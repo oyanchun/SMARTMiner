@@ -90,6 +90,8 @@ def get_final_label(batch_preds, threshold=0.5):
 
 # evaluation function
 def evaluate(model, dataloader, name="valid", raw_data=None, res_path=None, device=None):
+    model.float()
+    model.to(device)
     model.eval()
     gold, pred = [], []
     total_loss = 0
