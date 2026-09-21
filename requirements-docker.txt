@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+numpy
+protobuf
+scikit-learn
+sentencepiece
+torch
+transformers
+tqdm
