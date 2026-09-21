@@ -1,8 +1,131 @@
 import argparse, os, torch, json
+from pathlib import Path
 from transformers import AutoTokenizer
 from SpanQualifier import SpanQualifier, evaluate
 from SMARTClassifier import SMARTClassifier
 from utils import read_dataset
+
+# Extract goals from one free-text health coaching note.
+def extract_goals(
+    text,
+    output_model_path=None,
+    model_name="microsoft/deberta-v3-base",
+    max_span_gap=47,
+    dim2=64,
+    max_len=512,
+    device=None,
+    classify_model_path=None,
+    classify_model_name="microsoft/deberta-v3-large",
+    classify_max_len=64,
+):
+    """Extract goals and classify each one as SMART, partially SMART, or not SMART."""
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if not text.strip():
+        return []
+
+    if device is None:
+        device = torch.device("cpu")
+    else:
+        device = torch.device(device)
+
+    if output_model_path is None:
+        output_model_path = (
+            Path(__file__).resolve().parent.parent
+            / "outputs"
+            / "split_1"
+            / "extract_deberta-v3-base"
+            / "lr_3e-05_seed_30_bs_32_ga_4"
+            / "pytorch_model.bin"
+        )
+    output_model_path = Path(output_model_path)
+    if not output_model_path.is_file():
+        raise FileNotFoundError(f"SpanQualifier checkpoint not found: {output_model_path}")
+
+    checkpoint = torch.load(output_model_path, map_location=device)
+    model = SpanQualifier(model_name, max_span_gap, dim2, max_len, device).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    model.eval()
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    example = [{
+        "id": "free_text",
+        "question": "what are the smart goals mentioned in the text ?",
+        "context": text.strip(),
+        "answers": [],
+        "answers_idx": [],
+    }]
+    _, results = evaluate(
+        model,
+        example,
+        eval_batch_size=1,
+        max_len=max_len,
+        tokenizer=tokenizer,
+        device=device,
+    )
+    goals = results.get("free_text", [])
+    if not goals:
+        return []
+
+    if classify_model_path is None:
+        classify_model_path = (
+            Path(__file__).resolve().parent.parent
+            / "outputs"
+            / "split_1"
+            / "classify_deberta-v3-large"
+            / "lr_2e-05_seed_30_bs_4"
+            / "pytorch_model.bin"
+        )
+    classify_model_path = Path(classify_model_path)
+    if not classify_model_path.is_file():
+        raise FileNotFoundError(
+            f"SMARTClassifier checkpoint not found: {classify_model_path}"
+        )
+
+    classifier_tokenizer = AutoTokenizer.from_pretrained(classify_model_name)
+    classifier = SMARTClassifier(classify_model_name).to(device)
+    classifier.float()
+    classifier.load_state_dict(
+        torch.load(classify_model_path, map_location=device)
+    )
+    classifier.eval()
+
+    classified_goals = []
+    with torch.no_grad():
+        for goal in goals:
+            encoding = classifier_tokenizer(
+                goal,
+                truncation=True,
+                padding="max_length",
+                max_length=classify_max_len,
+                return_tensors="pt",
+            )
+            output = classifier(
+                input_ids=encoding["input_ids"].to(device),
+                attention_mask=encoding["attention_mask"].to(device),
+            )
+            sma_scores = [
+                float(output["specific"].item()),
+                float(output["measurable"].item()),
+                float(output["attainable"].item()),
+            ]
+            sma_pred = [int(score >= 0.5) for score in sma_scores]
+            total = sum(sma_pred)
+            if total == 3:
+                classification = "SMART"
+            elif total == 2:
+                classification = "Partially SMART"
+            else:
+                classification = "Not SMART"
+
+            classified_goals.append({
+                "goal": goal,
+                "classification": classification,
+                "SMA_pred": sma_pred,
+                "SMA_scores": sma_scores,
+            })
+
+    return classified_goals
 
 # inference for classification
 def classifying_goals(model_name, output_model_path, goals_dic_data, device, max_lenght):
